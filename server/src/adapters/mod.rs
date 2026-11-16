@@ -4,6 +4,7 @@
 
 mod claude;
 mod codex;
+mod copilot;
 mod pi;
 
 use serde_json::Value;
@@ -91,12 +92,13 @@ pub fn output(bin: &str, args: &[&str]) -> String {
 }
 
 /// To add a harness: write one adapter file and list it here.
-pub const NAMES: [&str; 3] = ["claude", "codex", "pi"];
+pub const NAMES: [&str; 4] = ["claude", "codex", "copilot", "pi"];
 
 pub fn get(name: &str) -> Option<Box<dyn Adapter>> {
     match name {
         "claude" => Some(Box::new(claude::Claude::default())),
         "codex" => Some(Box::new(codex::Codex)),
+        "copilot" => Some(Box::new(copilot::Copilot)),
         "pi" => Some(Box::new(pi::Pi)),
         _ => None,
     }
