@@ -1,0 +1,78 @@
+name: Release
+
+# Builds the two binaries (botd, botctl) for Linux x86_64 and aarch64 and attaches
+# them to a GitHub release, so nobody needs to reach crates.io from their desk.
+# Only first-party actions are used, pinned to a commit.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write # create the release and upload assets
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Check the tag matches the version in server/Cargo.toml
+        run: |
+          want="${TAG#v}"
+          have="$(sed -n 's/^version = "\(.*\)"$/\1/p' server/Cargo.toml | head -1)"
+          echo "tag=$TAG version=$have"
+          [ "$want" = "$have" ] || { echo "::error::Tag $TAG does not match server/Cargo.toml version $have"; exit 1; }
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Toolchains for both targets
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+          rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            case "$target" in
+              aarch64-*) export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+                         export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc ;;
+            esac
+            cargo build --release --locked --target "$target"
+            name="superbot-${TAG}-${target}"
+            mkdir -p "pkg/$name/deploy"
+            cp "target/$target/release/botd" "target/$target/release/botctl" "pkg/$name/"
+            cp README.md LICENSE .env.example "pkg/$name/"
+            cp deploy/install-computer.sh "pkg/$name/deploy/"
+            tar -C pkg -czf "dist/$name.tar.gz" "$name"
+            ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
+          done
+          ls -l dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/* --clobber
+          gh release view "$TAG" --json tagName,url,assets --jq '"\(.tagName) \(.url)\n" + ([.assets[].name] | join("\n"))'
