@@ -2,90 +2,14 @@
 //! A new session takes `--session-id <uuid>`; resuming uses `-r <id>`.
 //! The prompt goes in on stdin, never as an argument: quotes, backticks, `$`, very
 //! long text, and shell or WSL interop layers then have nothing to mangle.
-//!
-//! The CLI surface varies by version and by what an enterprise build allows, so the
-//! flags are read from `copilot --help` once per process: JSON output when that build
-//! has it, `--silent` text output otherwise (the reply still arrives, without per-tool
-//! status). Same care for `--allow-all` vs `--allow-all-tools`, telemetry and effort.
-//!
 //! Limitation: the CLI has no flag to append a system prompt, so the Bot's system
 //! prompt is prepended to the prompt text. It is rebuilt every run, so memory
 //! changes still reach the Bot.
 
 use super::{describe, new_uuid, output, str_of, Adapter, AgentEvent, ModelOption, RunInput};
 use serde_json::Value;
-use std::collections::HashSet;
-use std::sync::OnceLock;
 
 pub struct Copilot;
-
-/// What this copilot binary accepts, parsed from its own help once per process.
-struct Caps {
-    /// `--output-format json`. Without it the CLI prints plain text and we stream that.
-    json: bool,
-    silent: bool,
-    allow_all: bool,
-    allow_all_tools: bool,
-    telemetry: bool,
-    model: bool,
-    effort: bool,
-    session_id: bool,
-    resume: bool,
-}
-
-fn caps() -> &'static Caps {
-    static CAPS: OnceLock<Caps> = OnceLock::new();
-    CAPS.get_or_init(|| {
-        let help = output("copilot", &["--help"]);
-        let flags = help_flags(&help);
-        let has = |f: &str| flags.contains(f);
-        Caps {
-            // `[possible values: text, json]` sits in the --output-format section.
-            json: section(&help, "--output-format").contains("json"),
-            silent: has("--silent"),
-            allow_all: has("--allow-all"),
-            allow_all_tools: has("--allow-all-tools"),
-            telemetry: has("--disable-client-telemetry"),
-            model: has("--model"),
-            effort: has("--reasoning-effort"),
-            session_id: has("--session-id"),
-            resume: has("--resume") || has("--continue"),
-        }
-    })
-}
-
-/// Every `--flag` named in a help page, short forms and `<args>` stripped.
-fn help_flags(help: &str) -> HashSet<String> {
-    let mut set = HashSet::new();
-    for line in help.lines() {
-        let t = line.trim_start();
-        if !t.starts_with('-') {
-            continue;
-        }
-        for tok in t.split_whitespace() {
-            let Some(f) = tok.strip_prefix("--") else { continue };
-            let name = f.split(['=', ',']).next().unwrap_or(f).split('<').next().unwrap_or(f).trim();
-            if !name.is_empty() {
-                set.insert(format!("--{name}"));
-            }
-        }
-    }
-    set
-}
-
-/// The help text of one flag: its line plus the wrapped description lines that follow.
-fn section(help: &str, flag: &str) -> String {
-    let Some(i) = help.find(flag) else { return String::new() };
-    let mut out = String::new();
-    for (n, line) in help[i + flag.len()..].lines().enumerate() {
-        if n > 0 && line.trim_start().starts_with("--") {
-            break;
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
-}
 
 impl Adapter for Copilot {
     fn bin(&self) -> &'static str {
@@ -93,47 +17,28 @@ impl Adapter for Copilot {
     }
 
     fn args(&mut self, input: &RunInput, out: &mut Vec<AgentEvent>) -> Vec<String> {
-        let c = caps();
-        let mut a: Vec<String> = Vec::new();
-        if c.json {
-            a.extend(["--output-format".into(), "json".into()]);
-        } else if c.silent {
-            // Text output, without the stats footer, so the reply stays clean.
-            a.push("--silent".into());
-        }
-        // Non-interactive runs must pre-approve tools; same reach as the other adapters.
-        if c.allow_all {
-            a.push("--allow-all".into());
-        } else if c.allow_all_tools {
-            a.push("--allow-all-tools".into());
-        }
-        // The server is self-hosted: no telemetry leaves it on our behalf.
-        if c.telemetry {
-            a.push("--disable-client-telemetry".into());
-        }
+        let mut a: Vec<String> = vec![
+            "--output-format".into(),
+            "json".into(),
+            // Non-interactive runs must pre-approve tools; same reach as the other adapters.
+            "--allow-all".into(),
+            // The server is self-hosted: no telemetry leaves it on our behalf.
+            "--disable-client-telemetry".into(),
+        ];
         match &input.session_id {
-            Some(id) => {
-                if c.resume {
-                    a.extend(["-r".into(), id.clone()]);
-                }
-            }
+            Some(id) => a.extend(["-r".into(), id.clone()]),
             None => {
                 let id = new_uuid();
                 out.push(AgentEvent::Session(id.clone()));
-                if c.session_id {
-                    a.extend(["--session-id".into(), id]);
-                }
+                a.extend(["--session-id".into(), id]);
             }
         }
-        if let Some(m) = &input.model
-            && c.model
-        {
+        if let Some(m) = &input.model {
             a.extend(["--model".into(), m.clone()]);
         }
         // `auto` routes internally and refuses any effort ("does not support
         // reasoning effort configuration"); only explicit models take one.
         if let Some(e) = &input.effort
-            && c.effort
             && input.model.as_deref() != Some("auto")
         {
             a.extend(["--reasoning-effort".into(), e.clone()]);
@@ -143,10 +48,6 @@ impl Adapter for Copilot {
 
     fn stdin(&mut self, input: &RunInput) -> Option<String> {
         Some(format!("{}\n\n---\n\n{}", input.system.trim(), input.prompt))
-    }
-
-    fn plain(&self) -> bool {
-        !caps().json
     }
 
     fn on_event(&mut self, e: &Value, out: &mut Vec<AgentEvent>) {
