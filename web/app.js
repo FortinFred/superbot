@@ -479,6 +479,7 @@ const ICONS = {
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   job: '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/></svg>',
   chevron: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>',
 };
 const details = { open: false, tab: "activity", routines: [] };
 
@@ -522,7 +523,8 @@ function renderDetails() {
       <label class="d-item"><span class="d-text">Runs on</span>
         <select id="d-harness">${list.map((h) => `<option value="${h}" ${h === b.harness ? "selected" : ""}>${HARNESS_NAMES[h] || h}</option>`).join("")}</select></label>
       <div class="d-item"><span class="d-text">Hide from sidebar</span>${toggle(b.hidden, 'id="d-hide"')}</div>
-    </div>`;
+    </div>
+    ${b.primary ? "" : `<div class="d-card"><button class="d-item d-link d-danger" id="d-delete">${ICONS.trash}<span>Delete Bot</span></button></div>`}`;
   el.innerHTML = `
     <button class="d-close" id="d-close" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     <div class="d-hero">${avatar(b.color, b.shape, 120)}
@@ -551,6 +553,12 @@ $("details").addEventListener("click", async (e) => {
     const r = details.routines.find((x) => x.id === t.dataset.routine);
     try { Object.assign(r, await api("PATCH", `/api/routines/${r.id}`, { enabled: !r.enabled })); } catch (err) { alert(err.message); }
     return renderDetails();
+  }
+  if (t.id === "d-delete") {
+    const b = bot(activeId);
+    if (confirm(`Delete ${b.name}? This erases its chat, memory, and routines. Files on the computer stay.`)) {
+      try { await api("DELETE", `/api/bots/${b.id}`); closeDetails(); } catch (err) { alert(err.message); }
+    }
   }
 });
 $("details").addEventListener("change", (e) => { if (e.target.id === "d-harness") patchBot({ harness: e.target.value }); });
