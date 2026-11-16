@@ -191,7 +191,8 @@ impl App {
                 ("BOT_TOKEN".to_string(), self.cfg.bot_token.clone()),
             ]);
             let path = std::env::var("PATH").unwrap_or_default();
-            env.insert("PATH".into(), format!("{}:{path}", self.cfg.bin_dir.display()));
+            let dirs = [self.cfg.bin_dir.display().to_string()].into_iter().chain(adapters::user_bin_dirs());
+            env.insert("PATH".into(), format!("{}:{path}", dirs.collect::<Vec<_>>().join(":")));
             if let Some(screens) = &self.screens
                 && let Some(info) = screens.ensure(&bot.id, |id| self.is_running(id)).await
             {

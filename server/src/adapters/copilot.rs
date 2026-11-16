@@ -1,5 +1,7 @@
-//! GitHub Copilot CLI: `copilot -p <prompt> --output-format json`.
+//! GitHub Copilot CLI: `copilot --output-format json`.
 //! A new session takes `--session-id <uuid>`; resuming uses `-r <id>`.
+//! The prompt goes in on stdin, never as an argument: quotes, backticks, `$`, very
+//! long text, and shell or WSL interop layers then have nothing to mangle.
 //! Limitation: the CLI has no flag to append a system prompt, so the Bot's system
 //! prompt is prepended to the prompt text. It is rebuilt every run, so memory
 //! changes still reach the Bot.
@@ -15,10 +17,7 @@ impl Adapter for Copilot {
     }
 
     fn args(&mut self, input: &RunInput, out: &mut Vec<AgentEvent>) -> Vec<String> {
-        let prompt = format!("{}\n\n---\n\n{}", input.system.trim(), input.prompt);
         let mut a: Vec<String> = vec![
-            "-p".into(),
-            prompt,
             "--output-format".into(),
             "json".into(),
             // Non-interactive runs must pre-approve tools; same reach as the other adapters.
@@ -37,10 +36,18 @@ impl Adapter for Copilot {
         if let Some(m) = &input.model {
             a.extend(["--model".into(), m.clone()]);
         }
-        if let Some(e) = &input.effort {
+        // `auto` routes internally and refuses any effort ("does not support
+        // reasoning effort configuration"); only explicit models take one.
+        if let Some(e) = &input.effort
+            && input.model.as_deref() != Some("auto")
+        {
             a.extend(["--reasoning-effort".into(), e.clone()]);
         }
         a
+    }
+
+    fn stdin(&mut self, input: &RunInput) -> Option<String> {
+        Some(format!("{}\n\n---\n\n{}", input.system.trim(), input.prompt))
     }
 
     fn on_event(&mut self, e: &Value, out: &mut Vec<AgentEvent>) {
@@ -71,24 +78,32 @@ impl Adapter for Copilot {
     }
 
     /// The CLI has no command to list models (`/model` only exists inside an
-    /// interactive session), so offer what we can prove works: Auto, the BYOK
-    /// model from the environment, and the model saved in the CLI's own settings.
+    /// interactive session), and its own catalog answers `auto` for a plan that
+    /// routes internally: `copilot -p ok --model gpt-6-luna` is refused even when
+    /// the router just used that model. So offer what is provably usable:
+    /// Auto, the ids in COPILOT_MODELS, the BYOK COPILOT_MODEL, and the model
+    /// saved in the CLI's own settings. Auto advertises no efforts: it picks the
+    /// model and the effort itself, and rejects `--reasoning-effort`.
     fn models(&self) -> Vec<ModelOption> {
         let efforts: Vec<String> = ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(String::from).into();
         let mut list = vec![ModelOption {
             id: "auto".into(),
             label: "Auto (Copilot picks)".into(),
-            efforts: efforts.clone(),
+            efforts: vec![],
             aliases: vec![],
         }];
-        let configured = std::env::var("COPILOT_MODEL")
-            .ok()
-            .filter(|m| !m.trim().is_empty())
-            .or_else(|| Some(output("copilot", &["config", "model"]).trim().to_string()).filter(|m| !m.is_empty()));
-        if let Some(m) = configured.filter(|m| m != "auto")
-            && !list.iter().any(|o| o.id == m)
-        {
-            list.push(ModelOption { label: m.clone(), id: m, efforts, aliases: vec![] });
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+        let configured = env("COPILOT_MODELS")
+            .map(|v| v.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let configured = configured
+            .into_iter()
+            .chain(env("COPILOT_MODEL"))
+            .chain(Some(output("copilot", &["config", "model"]).trim().to_string()).filter(|m| !m.is_empty()));
+        for m in configured.filter(|m| m != "auto") {
+            if !list.iter().any(|o| o.id == m) {
+                list.push(ModelOption { label: m.clone(), id: m, efforts: efforts.clone(), aliases: vec![] });
+            }
         }
         list
     }

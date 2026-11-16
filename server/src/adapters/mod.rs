@@ -1,4 +1,4 @@
-//! The only contract between the server and a harness (Claude Code, Codex, Pi).
+//! The only contract between the server and a harness (Claude Code, Codex, Copilot, Pi).
 //! Each adapter builds a command line and maps the harness's JSON lines to `AgentEvent`s.
 //! Spawning, streaming, stopping, and exit handling are shared here.
 
@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::watch;
 
@@ -50,6 +50,11 @@ pub trait Adapter: Send {
     fn on_event(&mut self, e: &Value, out: &mut Vec<AgentEvent>);
     /// Models this harness can run here, with their reasoning efforts. Blocking.
     fn models(&self) -> Vec<ModelOption>;
+    /// Text to write to the harness's stdin. Preferred over an argument for long
+    /// prompts: no shell, argv or interop quoting can touch it.
+    fn stdin(&mut self, _input: &RunInput) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -104,19 +109,31 @@ pub fn get(name: &str) -> Option<Box<dyn Adapter>> {
     }
 }
 
-/// Harnesses whose CLI is on PATH.
+/// Harnesses whose CLI is on PATH, or in a user bin dir a systemd unit forgets.
 pub fn installed() -> Vec<&'static str> {
-    NAMES
-        .into_iter()
-        .filter(|n| {
-            let bin = get(n).unwrap().bin();
-            std::process::Command::new("sh")
-                .args(["-c", &format!("command -v {bin}")])
-                .stdout(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
-        })
-        .collect()
+    NAMES.into_iter().filter(|n| find(get(n).unwrap().bin()).is_some()).collect()
+}
+
+/// Resolves a binary like a login shell would: the inherited PATH first, then the
+/// usual user bin folders. A systemd unit starts with `/usr/local/bin:/usr/bin:/bin`,
+/// so without this `copilot` in ~/.npm-global/bin looks missing.
+pub fn find(bin: &str) -> Option<PathBuf> {
+    let mut dirs: Vec<PathBuf> =
+        std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    dirs.extend(user_bin_dirs().into_iter().map(PathBuf::from));
+    dirs.into_iter().map(|d| d.join(bin)).find(|p| p.is_file())
+}
+
+/// Folders added to the Bots' PATH, so the harnesses and their tools resolve.
+pub fn user_bin_dirs() -> Vec<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut dirs: Vec<String> = [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", ".volta/bin", ".deno/bin"]
+        .iter()
+        .map(|d| format!("{home}/{d}"))
+        .filter(|d| std::path::Path::new(d).is_dir())
+        .collect();
+    dirs.push("/usr/local/bin".into());
+    dirs
 }
 
 /// Why a run was cut short.
@@ -131,13 +148,14 @@ pub async fn run(
 ) {
     let mut out = Vec::new();
     let args = adapter.args(&input, &mut out);
+    let stdin = adapter.stdin(&input);
     out.drain(..).for_each(&mut emit);
 
     let mut child = match Command::new(adapter.bin())
         .args(&args)
         .current_dir(&input.cwd)
         .envs(&input.env)
-        .stdin(Stdio::null())
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0) // own group, so stop kills the whole tree
@@ -148,6 +166,13 @@ pub async fn run(
         Err(e) => return emit(AgentEvent::Error(format!("Couldn't start {}: {e}", adapter.bin()))),
     };
     let pid = child.id();
+
+    if let (Some(text), Some(mut si)) = (stdin, child.stdin.take()) {
+        tokio::spawn(async move {
+            let _ = si.write_all(text.as_bytes()).await;
+            let _ = si.shutdown().await;
+        });
+    }
 
     let mut stderr = child.stderr.take().unwrap();
     let stderr_task = tokio::spawn(async move {
