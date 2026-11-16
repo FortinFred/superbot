@@ -55,6 +55,10 @@ pub trait Adapter: Send {
     fn stdin(&mut self, _input: &RunInput) -> Option<String> {
         None
     }
+    /// True when the harness prints plain text instead of JSON lines.
+    fn plain(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -182,6 +186,7 @@ pub async fn run(
     });
 
     // JSON lines. Split only on "\n": some harnesses put U+2028 inside JSON strings.
+    let plain = adapter.plain();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).split(b'\n');
     let mut saw_error = false;
     let mut aborted = false;
@@ -189,6 +194,11 @@ pub async fn run(
         tokio::select! {
             line = lines.next_segment() => match line {
                 Ok(Some(bytes)) => {
+                    if plain {
+                        // No JSON support in this harness build: stream the text as it comes.
+                        emit(AgentEvent::TextDelta(format!("{}\n", String::from_utf8_lossy(&bytes))));
+                        continue;
+                    }
                     let Ok(v) = serde_json::from_slice::<Value>(&bytes) else { continue };
                     adapter.on_event(&v, &mut out);
                     for e in out.drain(..) {
