@@ -12,7 +12,6 @@ const HELP: &str = r#"botctl: manage your routines (scheduled tasks).
   botctl routine rm <id>                           Delete a routine
   botctl routine pause <id> | resume <id>
   botctl bots                                      List all Bots
-  botctl bot rm "<Bot name or id>"                 Delete a Bot and everything it owns
   botctl ask "<Bot name or id>" "<message>"        Ask another Bot; prints its reply
   botctl handoff "<what you need>"                 Ask the user to take over your screen; waits for "Done"
 
@@ -51,19 +50,6 @@ fn api(method: &str, path: &str, body: Option<String>) -> Result<String, String>
     }
 }
 
-/// Percent-encodes one path segment (Bot names can contain spaces).
-fn pct(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
-
 fn json_str(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -95,9 +81,6 @@ fn run(args: &[String]) -> Result<String, String> {
             api("PATCH", &format!("/api/routines/{id}"), Some(body)).map(|_| if *cmd == "pause" { "Paused." } else { "Resumed." }.into())
         }
         ["bots"] => api("GET", "/api/bots", None),
-        ["bot", "rm" | "delete", key] => {
-            api("DELETE", &format!("/api/bots/{}", pct(key)), None).map(|_| format!("Deleted Bot \"{key}\"."))
-        }
         ["ask", to, message] => {
             let body = format!("{{\"from\":{},\"to\":{},\"text\":{}}}", json_str(&bot), json_str(to), json_str(message));
             api("POST", "/api/ask", Some(body))

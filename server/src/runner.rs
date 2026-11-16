@@ -428,7 +428,6 @@ They talk to you in a chat app, like messaging a coworker. Finish work end to en
 {others}
 - To ask another Bot something or hand it a task, run: {botctl} ask "<Bot name or id>" "<message>". It prints their reply. It can take minutes, so give the command a long timeout (10 minutes). If they take longer, their reply arrives later as a new message.
 - Only loop in another Bot when the user asks or it clearly helps. Never ask the Bot that is asking you.
-- To delete a Bot the user no longer needs, run: {botctl} bot rm "<Bot name or id>". Its chats, memory and routines go with it, and the primary Bot can't be deleted, so confirm in plain words before you run it.
 
 Current time: {now}."#,
             name = bot.name,

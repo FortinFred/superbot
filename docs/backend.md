@@ -62,7 +62,7 @@ All JSON. Browser auth: HTTP Basic with `AUTH_PASSWORD`.
 - `GET /api/state`: user name, server version, installed harnesses, all Bots
 - `GET /api/events`: SSE stream (`message`, `draft`, `status`, `bot`, `botDeleted`, `resync`)
 - `POST /api/bots` `{name, harness?, model?, color?, shape?}`
-- `PATCH /api/bots/:id` `{name?, hidden?, harness?, model?, effort?, context?}`, `DELETE /api/bots/:id` (an id or a Bot's name)
+- `PATCH /api/bots/:id` `{name?, hidden?, harness?, model?, effort?, context?}`, `DELETE /api/bots/:id`
 - `GET /api/harnesses/:name/models`: models and reasoning efforts the harness offers (Claude Code: aliases; Codex: `codex debug models`; Pi: `pi --list-models`)
 - `GET|POST /api/bots/:id/messages` `{text, answer?: {messageId, option}}`
 - `POST /api/bots/:id/read`, `POST /api/bots/:id/stop`

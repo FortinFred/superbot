@@ -276,11 +276,6 @@ fn need_bot(app: &App, id: &str) -> Res<db::Bot> {
     app.db.bot(id).ok_or_else(|| not_found("Bot"))
 }
 
-/// An id, or a Bot's name as typed by a person.
-fn find_bot(app: &App, key: &str) -> Option<db::Bot> {
-    app.db.bot(key).or_else(|| app.db.bots().into_iter().find(|b| b.name.eq_ignore_ascii_case(key.trim())))
-}
-
 fn bot_patch(v: &Value) -> Res<BotPatch> {
     let mut p = BotPatch::default();
     if let Some(n) = v["name"].as_str().map(str::trim).filter(|n| !n.is_empty()) {
@@ -357,18 +352,16 @@ async fn update_bot(State(app): State<AppState>, Path(id): Path<String>, Json(v)
 }
 
 async fn delete_bot(State(app): State<AppState>, Path(id): Path<String>) -> Res {
-    // Accepts a Bot's id or its name, so `botctl bot rm "Researcher"` works.
-    let bot = find_bot(&app, &id).ok_or_else(|| not_found("Bot"))?;
-    if bot.primary {
+    if need_bot(&app, &id)?.primary {
         return Err(bad("The primary Bot can't be deleted"));
     }
-    app.stop(&bot.id);
+    app.stop(&id);
     if let Some(screens) = &app.screens {
-        screens.remove(&bot.id).await;
+        screens.remove(&id).await;
     }
-    app.db.delete_bot(&bot.id);
-    app.send(json!({ "type": "botDeleted", "botId": bot.id }));
-    Ok(Json(json!({ "ok": true, "id": bot.id })))
+    app.db.delete_bot(&id);
+    app.send(json!({ "type": "botDeleted", "botId": id }));
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn mark_read(State(app): State<AppState>, Path(id): Path<String>) -> Res {
