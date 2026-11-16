@@ -235,15 +235,23 @@ function render(keepScroll) {
 }
 
 // Model and effort picker above the input. Saved on the Bot, so each Bot keeps its own.
-const modelLists = {}; // harness -> Promise<[{id, label, efforts}]>
+const modelLists = {}; // harness -> { at, p: Promise<[{id, label, efforts}]> }
+// The list can change (a harness installed later), so it expires instead of
+// being cached for the life of the page.
+function modelsFor(harness) {
+  const c = modelLists[harness];
+  if (c && Date.now() - c.at < 60_000) return c.p;
+  const p = api("GET", `/api/harnesses/${harness}/models`).catch(() => []);
+  modelLists[harness] = { at: Date.now(), p };
+  return p;
+}
 let modelBarKey = "";
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 async function renderModelBar() {
   const first = bot(activeId);
   if (!first) return;
-  modelLists[first.harness] ??= api("GET", `/api/harnesses/${first.harness}/models`).catch(() => []);
-  const list = await modelLists[first.harness];
+  const list = await modelsFor(first.harness);
   const b = bot(activeId); // re-read: the Bot may have changed while loading
   if (!b || b.id !== first.id || b.harness !== first.harness) return;
   const key = [b.id, b.harness, b.model, b.effort, list.length].join("|");
@@ -273,7 +281,7 @@ async function saveModel(patch) {
 
 $("model-select").addEventListener("change", async (e) => {
   const b = bot(activeId);
-  const list = await modelLists[b.harness];
+  const list = await modelsFor(b.harness);
   const m = list.find((x) => x.id === e.target.value);
   // Keep the effort only if the new model supports it.
   const effort = m && b.effort && !m.efforts.includes(b.effort) ? null : b.effort;
