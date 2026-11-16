@@ -60,6 +60,8 @@ impl Adapter for Pi {
 
     /// From `pi --list-models`: models with credentials set up. Columns:
     /// provider, model, context, max-out, thinking (yes/no), images.
+    /// Parsed from both ends: a model id may itself contain spaces, and pi adds
+    /// columns over time, so the thinking flag is read as the second-to-last field.
     fn models(&self) -> Vec<ModelOption> {
         let efforts: Vec<String> = ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map(String::from).into();
         output("pi", &["--list-models"])
@@ -67,9 +69,23 @@ impl Adapter for Pi {
             .skip(1)
             .filter_map(|l| {
                 let c: Vec<&str> = l.split_whitespace().collect();
-                let id = format!("{}/{}", c.first()?, c.get(1)?);
-                let thinks = c.get(4) == Some(&"yes");
-                Some(ModelOption { label: id.clone(), id, efforts: if thinks { efforts.clone() } else { vec![] }, contexts: vec![], aliases: vec![] })
+                if c.len() < 6 || c[0].eq_ignore_ascii_case("provider") {
+                    return None;
+                }
+                // A wide model name would shift middle columns but never the ends.
+                let (provider, thinking) = (c[0], c[c.len() - 2]);
+                let model = c[1..c.len() - 4].join(" ");
+                if model.is_empty() {
+                    return None;
+                }
+                let id = format!("{provider}/{model}");
+                Some(ModelOption {
+                    label: model,
+                    id,
+                    efforts: if thinking == "yes" { efforts.clone() } else { vec![] },
+                    contexts: vec![],
+                    aliases: vec![],
+                })
             })
             .collect()
     }

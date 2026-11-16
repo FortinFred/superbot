@@ -265,8 +265,20 @@ async function renderModelBar() {
   const isCurrent = (m) => m.id === (b.model || "") || (b.model && m.aliases?.includes(b.model));
   if (b.model && !list.some(isCurrent)) models.push({ id: b.model, label: b.model, efforts: all, contexts: allContexts });
   const current = models.find(isCurrent);
-  $("model-select").innerHTML = models.map((m) =>
-    `<option value="${esc(m.id)}" ${m === current ? "selected" : ""}>${esc(m.label)}</option>`).join("");
+  // Group by provider (the id prefix) so hundreds of models stay browsable.
+  const groups = new Map();
+  for (const m of models) {
+    const g = m.id.includes("/") ? m.id.slice(0, m.id.indexOf("/")) : "";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(m);
+  }
+  $("model-select").innerHTML = [...groups].map(([g, list]) => {
+    const opts = list.map((m) => {
+      const label = g ? m.label || m.id.slice(g.length + 1) : m.label;
+      return `<option value="${esc(m.id)}" ${m === current ? "selected" : ""}>${esc(label)}</option>`;
+    }).join("");
+    return g ? `<optgroup label="${esc(g)}">${opts}</optgroup>` : opts;
+  }).join("");
   $("effort-select").innerHTML = ["", ...current.efforts].map((e) =>
     `<option value="${esc(e)}" ${e === (b.effort || "") ? "selected" : ""}>${e ? cap(e) : "Default effort"}</option>`).join("");
   $("effort-select").hidden = !current.efforts.length;
