@@ -259,16 +259,21 @@ async function renderModelBar() {
   modelBarKey = key;
 
   const all = [...new Set(list.flatMap((m) => m.efforts))];
-  const models = [{ id: "", label: "Default model", efforts: all }, ...list];
+  const allContexts = [...new Set(list.flatMap((m) => m.contexts || []))];
+  const models = [{ id: "", label: "Default model", efforts: all, contexts: allContexts }, ...list];
   // A Bot saved with an alias (e.g. "opus") shows as its exact model.
   const isCurrent = (m) => m.id === (b.model || "") || (b.model && m.aliases?.includes(b.model));
-  if (b.model && !list.some(isCurrent)) models.push({ id: b.model, label: b.model, efforts: all });
+  if (b.model && !list.some(isCurrent)) models.push({ id: b.model, label: b.model, efforts: all, contexts: allContexts });
   const current = models.find(isCurrent);
   $("model-select").innerHTML = models.map((m) =>
     `<option value="${esc(m.id)}" ${m === current ? "selected" : ""}>${esc(m.label)}</option>`).join("");
   $("effort-select").innerHTML = ["", ...current.efforts].map((e) =>
     `<option value="${esc(e)}" ${e === (b.effort || "") ? "selected" : ""}>${e ? cap(e) : "Default effort"}</option>`).join("");
   $("effort-select").hidden = !current.efforts.length;
+  const contexts = current.contexts || [];
+  $("context-select").innerHTML = ["", ...contexts].map((c) =>
+    `<option value="${esc(c)}" ${c === (b.context || "") ? "selected" : ""}>${c ? cap(c.replace(/_/g, " ")) : "Default context"}</option>`).join("");
+  $("context-select").hidden = !contexts.length;
   $("model-bar").hidden = false;
 }
 
@@ -283,11 +288,13 @@ $("model-select").addEventListener("change", async (e) => {
   const b = bot(activeId);
   const list = await modelsFor(b.harness);
   const m = list.find((x) => x.id === e.target.value);
-  // Keep the effort only if the new model supports it.
+  // Keep the effort and context only if the new model supports them.
   const effort = m && b.effort && !m.efforts.includes(b.effort) ? null : b.effort;
-  saveModel({ model: e.target.value || null, effort });
+  const context = m && b.context && !(m.contexts || []).includes(b.context) ? null : b.context;
+  saveModel({ model: e.target.value || null, effort, context });
 });
 $("effort-select").addEventListener("change", (e) => saveModel({ effort: e.target.value || null }));
+$("context-select").addEventListener("change", (e) => saveModel({ context: e.target.value || null }));
 
 // Live screen: the Bot's own desktop, streamed by voxl. View only until you take over.
 let screenTimer = null;
@@ -369,6 +376,7 @@ async function load(refresh) {
   harnesses = state.harnesses;
   defaultHarness = state.defaultHarness;
   bots = state.bots;
+  $("version").textContent = state.version ? `v${state.version}` : "";
   if (refresh) for (const id of Object.keys(messages)) messages[id] = await api("GET", `/api/bots/${id}/messages`);
   await open(activeId);
 }

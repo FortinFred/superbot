@@ -252,6 +252,7 @@ async fn state(State(app): State<AppState>) -> Json<Value> {
     let bots: Vec<Value> = app.db.bots().iter().map(|b| app.bot_view(b)).collect();
     Json(json!({
         "me": { "name": env("USER_NAME", "You") },
+        "version": env!("CARGO_PKG_VERSION"),
         "harnesses": adapters::installed(),
         "defaultHarness": app.cfg.default_harness,
         "bots": bots,
@@ -273,6 +274,11 @@ async fn list_bots(State(app): State<AppState>) -> Json<Value> {
 
 fn need_bot(app: &App, id: &str) -> Res<db::Bot> {
     app.db.bot(id).ok_or_else(|| not_found("Bot"))
+}
+
+/// An id, or a Bot's name as typed by a person.
+fn find_bot(app: &App, key: &str) -> Option<db::Bot> {
+    app.db.bot(key).or_else(|| app.db.bots().into_iter().find(|b| b.name.eq_ignore_ascii_case(key.trim())))
 }
 
 fn bot_patch(v: &Value) -> Res<BotPatch> {
@@ -302,6 +308,16 @@ fn bot_patch(v: &Value) -> Res<BotPatch> {
             p.effort = Some(Some(e.clone()))
         }
         Value::String(_) => return Err(bad("Invalid effort")),
+        _ => {}
+    }
+    // Context tiers are words like "default" or "long_context". Null = harness default.
+    match &v["context"] {
+        Value::Null if v.get("context").is_some() => p.context = Some(None),
+        Value::String(c) if c.is_empty() => p.context = Some(None),
+        Value::String(c) if c.len() <= 30 && c.chars().all(|x| x.is_ascii_alphanumeric() || x == '_' || x == '-') => {
+            p.context = Some(Some(c.clone()))
+        }
+        Value::String(_) => return Err(bad("Invalid context")),
         _ => {}
     }
     if let Some(h) = v.get("harness") {
@@ -341,16 +357,18 @@ async fn update_bot(State(app): State<AppState>, Path(id): Path<String>, Json(v)
 }
 
 async fn delete_bot(State(app): State<AppState>, Path(id): Path<String>) -> Res {
-    if need_bot(&app, &id)?.primary {
+    // Accepts a Bot's id or its name, so `botctl bot rm "Researcher"` works.
+    let bot = find_bot(&app, &id).ok_or_else(|| not_found("Bot"))?;
+    if bot.primary {
         return Err(bad("The primary Bot can't be deleted"));
     }
-    app.stop(&id);
+    app.stop(&bot.id);
     if let Some(screens) = &app.screens {
-        screens.remove(&id).await;
+        screens.remove(&bot.id).await;
     }
-    app.db.delete_bot(&id);
-    app.send(json!({ "type": "botDeleted", "botId": id }));
-    Ok(Json(json!({ "ok": true })))
+    app.db.delete_bot(&bot.id);
+    app.send(json!({ "type": "botDeleted", "botId": bot.id }));
+    Ok(Json(json!({ "ok": true, "id": bot.id })))
 }
 
 async fn mark_read(State(app): State<AppState>, Path(id): Path<String>) -> Res {

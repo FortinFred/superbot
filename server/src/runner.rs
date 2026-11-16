@@ -75,7 +75,7 @@ impl App {
             if t.is_empty() { m.question.and_then(|q| q["title"].as_str().map(String::from)).unwrap_or_default() } else { t }
         });
         let mut v = json!({
-            "id": b.id, "name": b.name, "color": b.color, "shape": b.shape, "harness": b.harness, "model": b.model, "effort": b.effort,
+            "id": b.id, "name": b.name, "color": b.color, "shape": b.shape, "harness": b.harness, "model": b.model, "effort": b.effort, "context": b.context,
             "primary": b.primary, "hidden": b.hidden, "unread": b.unread, "preview": preview.unwrap_or_default(), "working": false,
         });
         if let Some(run) = self.state().get(&b.id).and_then(|s| s.run.as_ref()) {
@@ -205,6 +205,7 @@ impl App {
                 cwd: self.cfg.workspace.clone(),
                 model: bot.model.clone(),
                 effort: bot.effort.clone(),
+                context: bot.context.clone(),
                 env,
                 state_dir: self.bot_dir(&bot.id),
             };
@@ -427,6 +428,7 @@ They talk to you in a chat app, like messaging a coworker. Finish work end to en
 {others}
 - To ask another Bot something or hand it a task, run: {botctl} ask "<Bot name or id>" "<message>". It prints their reply. It can take minutes, so give the command a long timeout (10 minutes). If they take longer, their reply arrives later as a new message.
 - Only loop in another Bot when the user asks or it clearly helps. Never ask the Bot that is asking you.
+- To delete a Bot the user no longer needs, run: {botctl} bot rm "<Bot name or id>". Its chats, memory and routines go with it, and the primary Bot can't be deleted, so confirm in plain words before you run it.
 
 Current time: {now}."#,
             name = bot.name,

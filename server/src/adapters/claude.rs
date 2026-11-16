@@ -74,7 +74,7 @@ impl Adapter for Claude {
             ("claude-sonnet-5-5", "Sonnet 5.5", "sonnet"),
             ("claude-haiku-5-5", "Haiku 5.5", "haiku"),
         ]
-        .map(|(id, label, alias)| ModelOption { id: id.into(), label: label.into(), efforts: efforts.clone(), aliases: vec![alias.into()] })
+        .map(|(id, label, alias)| ModelOption { id: id.into(), label: label.into(), efforts: efforts.clone(), contexts: vec![], aliases: vec![alias.into()] })
         .into()
     }
 }

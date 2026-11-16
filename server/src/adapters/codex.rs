@@ -76,6 +76,7 @@ impl Adapter for Codex {
                     .flatten()
                     .filter_map(|l| l["effort"].as_str().map(String::from))
                     .collect(),
+                contexts: vec![],
                 aliases: vec![],
             })
             .collect()

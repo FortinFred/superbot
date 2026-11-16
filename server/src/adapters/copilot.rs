@@ -43,6 +43,9 @@ impl Adapter for Copilot {
         {
             a.extend(["--reasoning-effort".into(), e.clone()]);
         }
+        if let Some(c) = &input.context {
+            a.extend(["--context".into(), c.clone()]);
+        }
         a
     }
 
@@ -86,10 +89,14 @@ impl Adapter for Copilot {
     /// model and the effort itself, and rejects `--reasoning-effort`.
     fn models(&self) -> Vec<ModelOption> {
         let efforts: Vec<String> = ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(String::from).into();
+        // `--context` takes default or long_context; which of them a model really
+        // offers is only in the CLI's model picker, so both are offered here.
+        let contexts: Vec<String> = ["default", "long_context"].map(String::from).into();
         let mut list = vec![ModelOption {
             id: "auto".into(),
             label: "Auto (Copilot picks)".into(),
             efforts: vec![],
+            contexts: contexts.clone(),
             aliases: vec![],
         }];
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
@@ -102,7 +109,7 @@ impl Adapter for Copilot {
             .chain(Some(output("copilot", &["config", "model"]).trim().to_string()).filter(|m| !m.is_empty()));
         for m in configured.filter(|m| m != "auto") {
             if !list.iter().any(|o| o.id == m) {
-                list.push(ModelOption { label: m.clone(), id: m, efforts: efforts.clone(), aliases: vec![] });
+                list.push(ModelOption { label: m.clone(), id: m, efforts: efforts.clone(), contexts: contexts.clone(), aliases: vec![] });
             }
         }
         list

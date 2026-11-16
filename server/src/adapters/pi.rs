@@ -69,7 +69,7 @@ impl Adapter for Pi {
                 let c: Vec<&str> = l.split_whitespace().collect();
                 let id = format!("{}/{}", c.first()?, c.get(1)?);
                 let thinks = c.get(4) == Some(&"yes");
-                Some(ModelOption { label: id.clone(), id, efforts: if thinks { efforts.clone() } else { vec![] }, aliases: vec![] })
+                Some(ModelOption { label: id.clone(), id, efforts: if thinks { efforts.clone() } else { vec![] }, contexts: vec![], aliases: vec![] })
             })
             .collect()
     }

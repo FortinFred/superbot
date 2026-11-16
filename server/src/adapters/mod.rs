@@ -37,6 +37,8 @@ pub struct RunInput {
     pub model: Option<String>,
     /// Reasoning effort, in the harness's own words (e.g. "high").
     pub effort: Option<String>,
+    /// Context window tier, in the harness's own words (e.g. "long_context").
+    pub context: Option<String>,
     pub env: HashMap<String, String>,
     /// A private folder for this Bot's harness files.
     pub state_dir: PathBuf,
@@ -63,6 +65,9 @@ pub struct ModelOption {
     pub label: String,
     /// Efforts this model accepts. Empty = no effort setting.
     pub efforts: Vec<String>,
+    /// Context window tiers this model accepts. Empty = no context setting.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub contexts: Vec<String>,
     /// Other names the harness accepts for this model (e.g. "opus").
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
