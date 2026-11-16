@@ -90,6 +90,9 @@ pub fn models(name: &str) -> Vec<ModelOption> {
 
 /// Runs a command and returns its stdout, or "" if it fails.
 pub fn output(bin: &str, args: &[&str]) -> String {
+    // Resolve the way a login shell would: `pi` lives in ~/.local/bin, which a
+    // systemd unit's PATH does not contain.
+    let bin = find(bin).unwrap_or_else(|| PathBuf::from(bin));
     std::process::Command::new(bin)
         .args(args)
         .stdin(Stdio::null())
