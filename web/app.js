@@ -84,8 +84,8 @@ async function api(method, path, body) {
 
 // State
 let me = { name: "" };
-let harnesses = [];
-let defaultHarness = "claude";
+let agents = []; // [{id, name}] the server can actually run
+let defaultAgent = "copilot";
 let bots = [];
 const messages = {}; // botId -> array, loaded on first open
 const drafts = {}; // botId -> streaming text
@@ -172,7 +172,7 @@ function renderChat(keepScroll) {
   if (!b) { $("messages").innerHTML = ""; return; }
   const el = $("messages");
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  $("bot-pill").innerHTML = `${avatar(b.color, b.shape, 30)}<span>${esc(b.name)}</span><span class="harness">${esc(b.harness)}</span>`;
+  $("bot-pill").innerHTML = `${avatar(b.color, b.shape, 30)}<span>${esc(b.name)}</span><span class="harness">${esc(agentName(b.harness))}</span>`;
   $("input").placeholder = `Message ${b.name}`;
   const list = messages[b.id] || [];
   let html = list.map((m, i) => renderMessage(m, list[i - 1])).join("");
@@ -235,13 +235,13 @@ function render(keepScroll) {
 }
 
 // Model and effort picker above the input. Saved on the Bot, so each Bot keeps its own.
-const modelLists = {}; // harness -> { at, p: Promise<[{id, label, efforts}]> }
-// The list can change (a harness installed later), so it expires instead of
+const modelLists = {}; // agent id -> { at, p: Promise<[{id, label, efforts}]> }
+// The list can change (an agent installed later), so it expires instead of
 // being cached for the life of the page.
 function modelsFor(harness) {
   const c = modelLists[harness];
   if (c && Date.now() - c.at < 60_000) return c.p;
-  const p = api("GET", `/api/harnesses/${harness}/models`).catch(() => []);
+  const p = api("GET", `/api/agents/${harness}/models`).catch(() => []);
   modelLists[harness] = { at: Date.now(), p };
   return p;
 }
@@ -385,8 +385,8 @@ function connect() {
 async function load(refresh) {
   const state = await api("GET", "/api/state");
   me = state.me;
-  harnesses = state.harnesses;
-  defaultHarness = state.defaultHarness;
+  agents = state.agents || [];
+  defaultAgent = state.defaultAgent || "copilot";
   bots = state.bots;
   $("version").textContent = state.version ? `v${state.version}` : "";
   if (refresh) for (const id of Object.keys(messages)) messages[id] = await api("GET", `/api/bots/${id}/messages`);
@@ -429,8 +429,9 @@ $("composer").addEventListener("submit", (e) => {
 
 // New Bot window
 const COLORS = ["#f5f5f5", "#9a6b3f", "#e5484d", "#e8702e", "#e9a23b", "#4cc06a", "#4fb5a5", "#3b82f6", "#8b5cf6", "#e64a9c", "#7a7a7a"];
-const HARNESS_NAMES = { claude: "Claude Code", codex: "Codex", pi: "Pi" };
-const nb = { color: COLORS[0], shape: "waddle", harness: "claude" };
+const agentName = (id) => (agents.find((a) => a.id === id) || {}).name || id;
+const agentIds = () => (agents.length ? agents.map((a) => a.id) : [defaultAgent]);
+const nb = { color: COLORS[0], shape: "waddle", harness: "" };
 const pickOne = (a) => a[Math.floor(Math.random() * a.length)];
 
 function renderNewBot() {
@@ -439,14 +440,13 @@ function renderNewBot() {
     `<button type="button" class="nb-shape" data-shape="${s}" title="${s}">${avatar(nb.color, s, 60, s === nb.shape)}</button>`).join("");
   $("nb-colors").innerHTML = COLORS.map((c) =>
     `<button type="button" class="nb-color ${c === nb.color ? "on" : ""}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join("");
-  const list = harnesses.length ? harnesses : Object.keys(HARNESS_NAMES);
-  $("nb-harness").innerHTML = list.map((h) =>
-    `<option value="${h}" ${h === nb.harness ? "selected" : ""}>${HARNESS_NAMES[h] || h}</option>`).join("");
+  $("nb-harness").innerHTML = agentIds().map((h) =>
+    `<option value="${h}" ${h === nb.harness ? "selected" : ""}>${esc(agentName(h))}</option>`).join("");
   $("nb-create").disabled = !$("nb-name").value.trim();
 }
 
 function openNewBot() {
-  Object.assign(nb, { color: pickOne(COLORS), shape: pickOne(Object.keys(SHAPES)), harness: defaultHarness });
+  Object.assign(nb, { color: pickOne(COLORS), shape: pickOne(Object.keys(SHAPES)), harness: defaultAgent });
   $("nb-name").value = "";
   $("nb-error").hidden = true;
   renderNewBot();
@@ -528,12 +528,12 @@ function renderDetails() {
       <div class="d-text"><div>Bot's computer</div><div class="d-sub">${b.working ? esc(b.status || "Working") : "Asleep"}</div></div>
       <div class="d-screen ${b.working ? "awake" : ""}">${avatar(b.color, b.shape, 40)}${b.working ? "" : "<i>z</i>"}</div>
     </div></div>`;
-  const list = harnesses.length ? harnesses : Object.keys(HARNESS_NAMES);
+  const list = agentIds();
   const settings = `
     <div class="d-section"><span>Bot</span></div>
     <div class="d-card">
       <label class="d-item"><span class="d-text">Runs on</span>
-        <select id="d-harness">${list.map((h) => `<option value="${h}" ${h === b.harness ? "selected" : ""}>${HARNESS_NAMES[h] || h}</option>`).join("")}</select></label>
+        <select id="d-harness">${list.map((h) => `<option value="${h}" ${h === b.harness ? "selected" : ""}>${esc(agentName(h))}</option>`).join("")}</select></label>
       <div class="d-item"><span class="d-text">Hide from sidebar</span>${toggle(b.hidden, 'id="d-hide"')}</div>
     </div>
     ${b.primary ? "" : `<div class="d-card"><button class="d-item d-link d-danger" id="d-delete">${ICONS.trash}<span>Delete Bot</span></button></div>`}`;

@@ -1,7 +1,7 @@
 //! botd: the server. Owns Bots, chats, memory files, and routines; runs each Bot
-//! on its harness (Claude Code, Codex, or Pi); serves the web app and its API.
+//! on an ACP agent (Copilot, OpenCode, or a configured bridge); serves the web app and its API.
 
-mod adapters;
+mod acp;
 mod cron;
 mod db;
 mod runner;
@@ -56,13 +56,13 @@ async fn main() {
     let port: u16 = env("PORT", "3000").parse().expect("PORT must be a number");
     let host = env("HOST", "127.0.0.1");
     let password = env("AUTH_PASSWORD", "");
-    let default_harness = env("DEFAULT_HARNESS", "claude");
+    let default_harness = env("DEFAULT_AGENT", &env("DEFAULT_HARNESS", "copilot"));
     if password.is_empty() && !["127.0.0.1", "localhost", "::1"].contains(&host.as_str()) {
         eprintln!("Refusing to listen on a public address without AUTH_PASSWORD.");
         std::process::exit(1);
     }
-    if adapters::get(&default_harness).is_none() {
-        eprintln!("DEFAULT_HARNESS must be one of: {}", adapters::NAMES.join(", "));
+    if acp::get(&default_harness).is_none() {
+        eprintln!("DEFAULT_AGENT must be one of: {}", acp::ids().join(", "));
         std::process::exit(1);
     }
     PASSWORD.set(password).unwrap();
@@ -98,7 +98,7 @@ async fn main() {
     let api = Router::new()
         .route("/state", get(state))
         .route("/events", get(events))
-        .route("/harnesses/{name}/models", get(list_models))
+        .route("/agents/{name}/models", get(list_models))
         .route("/bots", get(list_bots).post(create_bot))
         .route("/bots/{id}", patch(update_bot).delete(delete_bot))
         .route("/bots/{id}/messages", get(list_messages).post(send_message))
@@ -130,7 +130,7 @@ async fn main() {
 
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await.expect("bind");
     println!("Listening on http://{host}:{port}");
-    println!("Harnesses on PATH: {}. Default: {}.", adapters::installed().join(", "), app.cfg.default_harness);
+    println!("Agents on PATH: {}. Default: {}.", acp::installed().iter().map(|a| a.id.as_str()).collect::<Vec<_>>().join(", "), app.cfg.default_harness);
     println!("Screens: {}.", if app.screens.is_some() { "on" } else { "off (install Xvfb and openbox to turn them on)" });
 
     // On SIGTERM/SIGINT: stop agents (queued work runs after restart), then exit.
@@ -253,18 +253,18 @@ async fn state(State(app): State<AppState>) -> Json<Value> {
     Json(json!({
         "me": { "name": env("USER_NAME", "You") },
         "version": env!("CARGO_PKG_VERSION"),
-        "harnesses": adapters::installed(),
-        "defaultHarness": app.cfg.default_harness,
+        "agents": acp::installed().iter().map(|a| json!({ "id": a.id, "name": a.name })).collect::<Vec<_>>(),
+        "defaultAgent": app.cfg.default_harness,
         "bots": bots,
     }))
 }
 
-/// Models and reasoning efforts the harness offers on this server.
+/// Models an agent offers on this server.
 async fn list_models(Path(name): Path<String>) -> Res {
-    if adapters::get(&name).is_none() {
-        return Err(not_found("Harness"));
+    if acp::get(&name).is_none() {
+        return Err(not_found("Agent"));
     }
-    let list = tokio::task::spawn_blocking(move || adapters::models(&name)).await.unwrap_or_default();
+    let list = tokio::task::spawn_blocking(move || acp::models(&name)).await.unwrap_or_default();
     Ok(Json(json!(list)))
 }
 
@@ -316,8 +316,8 @@ fn bot_patch(v: &Value) -> Res<BotPatch> {
         _ => {}
     }
     if let Some(h) = v.get("harness") {
-        let h = h.as_str().filter(|h| adapters::get(h).is_some());
-        let h = h.ok_or_else(|| bad(format!("Harness must be one of: {}", adapters::NAMES.join(", "))))?;
+        let h = h.as_str().filter(|h| acp::get(h).is_some());
+        let h = h.ok_or_else(|| bad(format!("Agent must be one of: {}", acp::ids().join(", "))))?;
         p.harness = Some(h.into());
     }
     Ok(p)

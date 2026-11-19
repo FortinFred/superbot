@@ -6,32 +6,33 @@ Status: proposal. Nothing is decided until it has an ADR in `docs/adr/`.
 
 A self-hosted Grok Bot alternative that runs on any agent harness.
 
-## Harness agnostic
+## Agent agnostic
 
-The harness is the agent that does the work. We do not build our own agent loop.
+The agent is the thing that does the work. We do not build our own agent loop.
 
-Supported harnesses:
+We speak one protocol: the Agent Client Protocol (ACP), JSON-RPC over stdio. An agent is a launch command, so any ACP agent works without a server change (see `docs/adr/0004-acp-only.md`).
 
-1. Claude Code CLI (first)
-2. Codex CLI
-3. Grok Build
-4. Hermes Agent
-5. Pi Agent
+Built in:
 
-Each harness has one adapter. An adapter only:
+1. Copilot CLI (`copilot --acp`)
+2. OpenCode (`opencode acp`)
 
-- starts or resumes a session for a Bot
+Configured through `ACP_AGENTS` (bridges, unsupported by us): Pi (`pi-acp`), Claude Code (`claude-agent-acp`), Codex (its ACP adapter).
+
+One integration covers them all:
+
+- starts or resumes an agent session for a Bot
 - sends a message in
 - streams events out (text, tool calls, approvals, done)
-- passes in the Bot's memory, skills, and MCP tools in the harness's own native format
+- passes in the Bot's memory as prompt text, since ACP has no system-prompt field
 
-Everything else is shared and never knows which harness is running.
+Everything else is shared and never knows which agent is running.
 
 ## Proposed parts
 
 - **Web app**: chat with Bots, watch their screen, approve actions.
 - **Server**: owns Bots, memory, skills, routines, approvals, and the Vault.
-- **Adapters**: one per harness.
+- **Agents**: one ACP client (`server/src/acp.rs`), configured, not coded.
 - **Computer**: a Docker container on the VPS with a Linux desktop, browser, and terminal. Each Bot gets its own screen.
 
 Language: Rust first, one Cargo workspace. Server, adapters, computer daemon, and CLI are Rust. The web UI uses as little JS as possible (Rust to WASM if it works well). Why: fast, low memory on a shared VPS (RAM is the bottleneck, see `background/grok-bot-computer-specs.md`), and one binary to deploy.

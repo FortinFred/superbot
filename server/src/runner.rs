@@ -1,7 +1,7 @@
 //! Runs Bots: one task at a time per Bot, in order. Builds the system prompt
 //! (identity, rules, memory), streams harness events to the web app, and saves replies.
 
-use crate::adapters::{self, AbortReason, AgentEvent, RunInput};
+use crate::acp::{self, AbortReason, AgentEvent, RunInput};
 use crate::db::{Bot, BotPatch, Db, Message};
 use crate::screen::{self, Screens};
 use serde_json::{json, Value};
@@ -71,7 +71,7 @@ impl App {
     pub fn bot_view(&self, b: &Bot) -> Value {
         let preview = self.db.last_message(&b.id).map(|m| {
             let t: String = m.text.chars().filter(|c| !"#*_`>[]".contains(*c)).collect();
-            let t = adapters::short(&t);
+            let t = acp::short(&t);
             if t.is_empty() { m.question.and_then(|q| q["title"].as_str().map(String::from)).unwrap_or_default() } else { t }
         });
         let mut v = json!({
@@ -161,8 +161,20 @@ impl App {
     }
 
     async fn run_one(self: &Arc<Self>, mut bot: Bot, msg: &Message) {
-        if adapters::get(&bot.harness).is_none() {
-            return self.say(&bot.id, &format!("Unknown harness \"{}\".", bot.harness), true);
+        let agent = match acp::get(&bot.harness) {
+            Some(a) => a,
+            // A Bot saved before ACP-only, or a typo: say how to fix it.
+            None => {
+                let known = acp::ids().join(", ");
+                return self.say(&bot.id, &format!("Unknown agent \"{}\". Pick one of: {known}.", bot.harness), true);
+            }
+        };
+        if acp::find(&agent.bin).is_none() {
+            return self.say(
+                &bot.id,
+                &format!("{} is not installed here. Install `{}` (and log in) on the server, or pick another agent.", agent.name, agent.bin),
+                true,
+            );
         }
         self.init_bot_files(&bot);
         self.db.set_status(msg.id, "running");
@@ -191,7 +203,7 @@ impl App {
                 ("BOT_TOKEN".to_string(), self.cfg.bot_token.clone()),
             ]);
             let path = std::env::var("PATH").unwrap_or_default();
-            let dirs = [self.cfg.bin_dir.display().to_string()].into_iter().chain(adapters::user_bin_dirs());
+            let dirs = [self.cfg.bin_dir.display().to_string()].into_iter().chain(acp::user_bin_dirs());
             env.insert("PATH".into(), format!("{}:{path}", dirs.collect::<Vec<_>>().join(":")));
             if let Some(screens) = &self.screens
                 && let Some(info) = screens.ensure(&bot.id, |id| self.is_running(id)).await
@@ -207,13 +219,12 @@ impl App {
                 effort: bot.effort.clone(),
                 context: bot.context.clone(),
                 env,
-                state_dir: self.bot_dir(&bot.id),
             };
 
             let mut errors: Vec<String> = Vec::new();
             let mut replies = 0;
             let id = bot.id.clone();
-            adapters::run(adapters::get(&bot.harness).unwrap(), input, abort_rx.clone(), |e| match e {
+            acp::run(agent.clone(), input, abort_rx.clone(), |e| match e {
                 AgentEvent::Session(s) => {
                     if self.db.bot(&id).and_then(|b| b.session_id).as_deref() != Some(&s) {
                         self.db.update_bot(&id, BotPatch { session_id: Some(Some(s)), ..Default::default() });
